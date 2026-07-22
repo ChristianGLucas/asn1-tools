@@ -28,11 +28,13 @@ def parse_pkcs1_rsa_key(ax: AxiomContext, input: Asn1Input) -> RsaPrivateKeyResu
     """
     try:
         data = resolve_input_bytes(input)
-        try:
-            rsa = keys.RSAPrivateKey.load(data)
-        except Exception as e:
-            raise Asn1Error(f"not a valid RSAPrivateKey: {e}") from e
+        rsa = keys.RSAPrivateKey.load(data)
 
+        # asn1crypto parses fields LAZILY: a structurally well-formed outer
+        # SEQUENCE can still carry a corrupt/truncated inner field, which only
+        # raises when that field is actually touched (below), not at .load().
+        # Every access is inside this same try block so that case is caught
+        # too, not just a bad outer shape.
         version_bytes = rsa["version"].contents
         version = int.from_bytes(version_bytes, "big", signed=False) if version_bytes else 0
         if version != 0:
@@ -54,3 +56,5 @@ def parse_pkcs1_rsa_key(ax: AxiomContext, input: Asn1Input) -> RsaPrivateKeyResu
         )
     except Asn1Error as e:
         return RsaPrivateKeyResult(ok=False, error=str(e))
+    except Exception as e:
+        return RsaPrivateKeyResult(ok=False, error=f"not a valid RSAPrivateKey: {e}")

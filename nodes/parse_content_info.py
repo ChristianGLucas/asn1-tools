@@ -23,11 +23,13 @@ def parse_content_info(ax: AxiomContext, input: Asn1Input) -> ContentInfoResult:
     """
     try:
         data = resolve_input_bytes(input)
-        try:
-            ci = cms.ContentInfo.load(data)
-        except Exception as e:
-            raise Asn1Error(f"not a valid ContentInfo: {e}") from e
+        ci = cms.ContentInfo.load(data)
 
+        # asn1crypto parses fields LAZILY: a structurally well-formed outer
+        # SEQUENCE can still carry a corrupt/truncated inner field, which only
+        # raises when that field is actually touched (below), not at .load().
+        # Every access is inside this same try block so that case is caught
+        # too, not just a bad outer shape.
         content_type_oid = ci["content_type"].dotted
         _category, content_type_name = lookup_oid_info(content_type_oid)
         content_der = ci["content"].dump()
@@ -47,3 +49,5 @@ def parse_content_info(ax: AxiomContext, input: Asn1Input) -> ContentInfoResult:
         return result
     except Asn1Error as e:
         return ContentInfoResult(ok=False, error=str(e))
+    except Exception as e:
+        return ContentInfoResult(ok=False, error=f"not a valid ContentInfo: {e}")

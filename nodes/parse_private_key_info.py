@@ -24,11 +24,13 @@ def parse_private_key_info(ax: AxiomContext, input: Asn1Input) -> PrivateKeyInfo
     """
     try:
         data = resolve_input_bytes(input)
-        try:
-            pki = keys.PrivateKeyInfo.load(data)
-        except Exception as e:
-            raise Asn1Error(f"not a valid PrivateKeyInfo: {e}") from e
+        pki = keys.PrivateKeyInfo.load(data)
 
+        # asn1crypto parses fields LAZILY: a structurally well-formed outer
+        # SEQUENCE can still carry a corrupt/truncated inner field, which only
+        # raises when that field is actually touched (below), not at .load().
+        # Every access is inside this same try block so that case is caught
+        # too, not just a bad outer shape.
         version = int.from_bytes(pki["version"].contents, "big", signed=False) if pki["version"].contents else 0
         algo = pki["private_key_algorithm"]
         algo_oid = algo["algorithm"].dotted
@@ -47,3 +49,5 @@ def parse_private_key_info(ax: AxiomContext, input: Asn1Input) -> PrivateKeyInfo
         )
     except Asn1Error as e:
         return PrivateKeyInfoResult(ok=False, error=str(e))
+    except Exception as e:
+        return PrivateKeyInfoResult(ok=False, error=f"not a valid PrivateKeyInfo: {e}")

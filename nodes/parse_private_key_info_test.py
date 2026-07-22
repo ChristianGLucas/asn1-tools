@@ -82,6 +82,22 @@ def test_parse_private_key_info_rejects_malformed_input():
     assert result.error != ""
 
 
+def test_parse_private_key_info_rejects_outer_valid_inner_corrupt_input():
+    """Regression: a PrivateKeyInfo SEQUENCE that loads fine at the top level
+    but carries a truncated privateKeyAlgorithm (an OID declaring 5 content
+    bytes, only 2 supplied) must not crash — asn1crypto only raises when that
+    lazily-parsed field is actually touched, after .load() has already
+    succeeded."""
+    ax = _TestContext()
+    # 30 0d  SEQUENCE, length 13
+    #    02 01 00                    version 0
+    #    30 04 06 05 2a 86           privateKeyAlgorithm: truncated OID (as above)
+    #    02 00 01                    (padding/garbage to fill the declared outer length)
+    result = parse_private_key_info(ax, Asn1Input(data_hex="300d020100300406052a8604020001"))
+    assert result.ok is False
+    assert result.error != ""
+
+
 def test_parse_private_key_info_returns_isinstance_result():
     from nodes._test_fixtures import RSA_PKCS8_PEM
     ax = _TestContext()

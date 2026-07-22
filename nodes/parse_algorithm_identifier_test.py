@@ -91,6 +91,20 @@ def test_parse_algorithm_identifier_rejects_malformed_input():
     assert result.error != ""
 
 
+def test_parse_algorithm_identifier_rejects_outer_valid_inner_corrupt_input():
+    """Regression: asn1crypto parses fields LAZILY, so a SEQUENCE that loads
+    fine at the top level can still carry a truncated inner field (here, an
+    OID claiming 5 content bytes but supplying only 2) that only raises when
+    actually accessed. Every field access must be inside the same error
+    boundary as .load() itself, not just the initial load call."""
+    ax = _TestContext()
+    # 30 04  SEQUENCE, length 4
+    #    06 05 2a 86   OID, declares length 5, only 2 bytes follow -> truncated
+    result = parse_algorithm_identifier(ax, Asn1Input(data_hex="300406052a86"))
+    assert result.ok is False
+    assert result.error != ""
+
+
 def test_parse_algorithm_identifier_returns_isinstance_result():
     ax = _TestContext()
     result = parse_algorithm_identifier(ax, Asn1Input(data_hex="300b0609608648016503040201"))

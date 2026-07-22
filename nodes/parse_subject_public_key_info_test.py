@@ -90,6 +90,19 @@ def test_parse_subject_public_key_info_rejects_malformed_input():
     assert result.error != ""
 
 
+def test_parse_subject_public_key_info_rejects_outer_valid_inner_corrupt_input():
+    """Regression: a SubjectPublicKeyInfo SEQUENCE that loads fine at the top
+    level but carries a truncated algorithm OID must not crash — asn1crypto
+    only raises when that lazily-parsed field is actually touched, after
+    .load() has already succeeded."""
+    ax = _TestContext()
+    # 30 06  SEQUENCE, length 6
+    #    30 04 06 05 2a 86   algorithm AlgorithmIdentifier: truncated OID
+    result = parse_subject_public_key_info(ax, Asn1Input(data_hex="3006300406052a86"))
+    assert result.ok is False
+    assert result.error != ""
+
+
 def test_parse_subject_public_key_info_returns_isinstance_result():
     from nodes._test_fixtures import RSA_PUB_PEM
     ax = _TestContext()

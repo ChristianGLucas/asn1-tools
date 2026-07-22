@@ -22,11 +22,13 @@ def parse_algorithm_identifier(ax: AxiomContext, input: Asn1Input) -> AlgorithmI
     """
     try:
         data = resolve_input_bytes(input)
-        try:
-            ai = algos.AlgorithmIdentifier.load(data)
-        except Exception as e:
-            raise Asn1Error(f"not a valid AlgorithmIdentifier: {e}") from e
+        ai = algos.AlgorithmIdentifier.load(data)
 
+        # asn1crypto parses fields LAZILY: a structurally well-formed outer
+        # SEQUENCE can still carry a corrupt/truncated inner field, which only
+        # raises when that field is actually touched (below), not at .load().
+        # Every access is inside this same try block so that case is caught
+        # too, not just a bad outer shape.
         oid = ai["algorithm"].dotted
         _category, name = lookup_oid_info(oid)
         params_der = ai["parameters"].dump()
@@ -46,3 +48,5 @@ def parse_algorithm_identifier(ax: AxiomContext, input: Asn1Input) -> AlgorithmI
         return result
     except Asn1Error as e:
         return AlgorithmIdentifierResult(ok=False, error=str(e))
+    except Exception as e:
+        return AlgorithmIdentifierResult(ok=False, error=f"not a valid AlgorithmIdentifier: {e}")

@@ -72,6 +72,20 @@ def test_parse_pkcs1_rsa_key_rejects_malformed_input():
     assert result.error != ""
 
 
+def test_parse_pkcs1_rsa_key_rejects_outer_valid_inner_corrupt_input():
+    """Regression: a RSAPrivateKey SEQUENCE that loads fine at the top level
+    but carries a truncated inner INTEGER field must not crash — asn1crypto
+    only raises when that lazily-parsed field is actually touched, after
+    .load() has already succeeded."""
+    ax = _TestContext()
+    # 30 07  SEQUENCE, length 7
+    #    02 01 00        version 0
+    #    02 05 00 01     modulus INTEGER declares length 5, only 2 bytes follow
+    result = parse_pkcs1_rsa_key(ax, Asn1Input(data_hex="300702010002050001"))
+    assert result.ok is False
+    assert result.error != ""
+
+
 def test_parse_pkcs1_rsa_key_rejects_multi_prime_version():
     """Patch the real key's version field from 0 (two-prime) to 1 (multi) —
     a minimal, surgical byte edit independent of any encoding logic under

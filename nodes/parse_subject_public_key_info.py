@@ -26,11 +26,13 @@ def parse_subject_public_key_info(ax: AxiomContext, input: Asn1Input) -> PublicK
     """
     try:
         data = resolve_input_bytes(input)
-        try:
-            spki = keys.PublicKeyInfo.load(data)
-        except Exception as e:
-            raise Asn1Error(f"not a valid SubjectPublicKeyInfo: {e}") from e
+        spki = keys.PublicKeyInfo.load(data)
 
+        # asn1crypto parses fields LAZILY: a structurally well-formed outer
+        # SEQUENCE can still carry a corrupt/truncated inner field, which only
+        # raises when that field is actually touched (below), not at .load().
+        # Every access is inside this same try block so that case is caught
+        # too, not just a bad outer shape.
         algo = spki["algorithm"]
         algo_oid = algo["algorithm"].dotted
         _category, algo_name = lookup_oid_info(algo_oid)
@@ -50,3 +52,5 @@ def parse_subject_public_key_info(ax: AxiomContext, input: Asn1Input) -> PublicK
         )
     except Asn1Error as e:
         return PublicKeyInfoResult(ok=False, error=str(e))
+    except Exception as e:
+        return PublicKeyInfoResult(ok=False, error=f"not a valid SubjectPublicKeyInfo: {e}")
