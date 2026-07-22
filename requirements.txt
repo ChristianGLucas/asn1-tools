@@ -1,0 +1,2 @@
+# Add your Python runtime dependencies here, one per line.
+asn1crypto==1.5.1

@@ -1,0 +1,155 @@
+name: christiangeorgelucas/asn1-tools
+version: 0.1.0
+language: python
+description: >-
+  Deterministic, offline generic ASN.1 (X.690) structure parsing and encoding
+  for the Axiom marketplace — decode any BER/CER/DER blob into a recursively
+  structured, schema-free tree (tag class/number, constructed flag, nested
+  children, raw bytes, and best-effort typed values for OIDs/integers/strings/
+  times/booleans/bit strings), encode that tree back to DER, armor/dearmor PEM
+  (any label, multi-block, legacy headers), resolve algorithm/content-type
+  OIDs to friendly names, and decode the common algorithm-agnostic PKI wrapper
+  structures (AlgorithmIdentifier, PKCS#8 PrivateKeyInfo, PKCS#1 RSAPrivateKey,
+  SubjectPublicKeyInfo, CMS/PKCS#7 ContentInfo). Wraps asn1crypto (MIT,
+  https://github.com/wbond/asn1crypto — zero runtime dependencies), reusing
+  its own low-level BER/DER framing primitives and per-universal-type semantic
+  decoders rather than reimplementing X.690. Distinct from
+  christiangeorgelucas/certificate-tools, which handles X.509-certificate
+  specific semantics (SANs, key usage, chain linkage) — this package is the
+  generic ASN.1 structure layer beneath it, for any DER/BER blob, not just
+  certificates. Every node is a pure, bounded, single-input to single-output
+  transform (input size, tree depth, and node count are all capped);
+  malformed input returns a structured error, never a crash. Offline — no
+  network access, no external service.
+nodes:
+    - name: DecodeDer
+      input: Asn1Input
+      output: DecodeDerResult
+      description: >-
+        Decode a caller-supplied ASN.1 BER/CER/DER blob (pem, data_base64, or
+        data_hex) into a generic, recursively structured tree — every TLV's
+        tag class/number, constructed flag, content length, nested children,
+        raw content bytes (hex + base64), and, for recognized universal
+        primitive types (BOOLEAN, INTEGER/ENUMERATED, OBJECT IDENTIFIER,
+        NULL, BIT STRING, UTCTime/GeneralizedTime, and the text-string
+        variants), a best-effort typed interpretation. A schema-free
+        structural decode, unlike this package's schema-specific Parse*
+        nodes. Bounded to 2 MiB input, 64 levels of nesting, and 50,000 tree
+        nodes. Malformed or over-bound input returns a structured error,
+        never a crash.
+    - name: EncodeDer
+      input: Asn1Node
+      output: EncodeDerResult
+      description: >-
+        Encode a generic Asn1Node tree (the same shape DecodeDer produces)
+        back into DER bytes — the structural inverse of DecodeDer. A
+        constructed node's encoded content is its children's encoded bytes
+        concatenated in order; a primitive node's content is its
+        value_hex/value_base64 raw bytes taken as-is (the typed convenience
+        fields such as value_oid/value_integer are decode-only and not
+        consulted), so DecodeDer -> EncodeDer round-trips any well-formed
+        input byte-for-byte. An unknown tag_class, a negative tag_number, or
+        unparsable value bytes returns a structured error, never a crash.
+    - name: DecodePem
+      input: PemInput
+      output: PemDecodeResult
+      description: >-
+        Split a PEM text — one or more concatenated BEGIN/END armored blocks
+        of any label — into its individual blocks, each de-armored to raw DER
+        bytes (hex + base64) plus its label and any legacy Name/Value headers
+        (e.g. an old encrypted key's Proc-Type/DEK-Info pair). A pure
+        PEM-envelope operation; the DER payload is returned as bytes only,
+        not further decoded — feed it to DecodeDer or a Parse* node next.
+        Bounded to 8 MiB of PEM text and 1000 blocks. Malformed or non-PEM
+        input returns a structured error, never a crash.
+    - name: EncodePem
+      input: PemEncodeInput
+      output: PemEncodeResult
+      description: >-
+        Armor raw DER/BER bytes (data_hex or data_base64) into PEM text under
+        a given label (e.g. CERTIFICATE, PRIVATE KEY), with optional legacy
+        Name/Value headers written after the BEGIN line. The inverse of
+        DecodePem for a single block. A blank label, or input exceeding the 2
+        MiB size bound, returns a structured error, never a crash.
+    - name: LookupOid
+      input: OidInput
+      output: OidResult
+      description: >-
+        Resolve a dotted-decimal OID (e.g. 1.2.840.113549.1.1.1) to a
+        recognized friendly name, checked against asn1crypto's own
+        algorithm/content-type OID registries — public-key algorithms (rsa,
+        ec, ed25519, ...), signed-digest algorithms (sha256_rsa,
+        sha256_ecdsa, ...), digest algorithms (sha256, sha3_256, ...), and
+        CMS/PKCS#7 content types (data, signed_data, enveloped_data, ...).
+        known=false (not an error) for a well-formed but unrecognized OID. A
+        string that isn't valid dotted-decimal notation returns a structured
+        error.
+    - name: ParseAlgorithmIdentifier
+      input: Asn1Input
+      output: AlgorithmIdentifierResult
+      description: >-
+        Decode a standalone AlgorithmIdentifier (the SEQUENCE { algorithm
+        OBJECT IDENTIFIER, parameters ANY OPTIONAL } structure used
+        throughout PKCS/X.509/CMS wherever an algorithm and its tuning
+        parameters are named) into its OID, a recognized friendly name, and
+        its parameters — both as raw DER and, when they are themselves a
+        well-formed ASN.1 value, a generic decoded tree. parameters_present
+        is false (not an error) when the OPTIONAL field was omitted
+        entirely, distinct from parameters being present but NULL. Malformed
+        input, or input that isn't an AlgorithmIdentifier, returns a
+        structured error, never a crash.
+    - name: ParsePrivateKeyInfo
+      input: Asn1Input
+      output: PrivateKeyInfoResult
+      description: >-
+        Decode a PKCS#8 PrivateKeyInfo structure (the algorithm-agnostic
+        PRIVATE KEY wrapper used by RSA, EC, Ed25519, Ed448, X25519, X448,
+        and DSA keys alike) into its version, algorithm OID + recognized
+        name, the algorithm's own parameters, and the raw privateKey OCTET
+        STRING content — itself still an algorithm-specific encoding (an
+        RSAPrivateKey DER structure for RSA; see ParsePkcs1RsaKey), returned
+        as-is rather than further decoded. Standalone key-structure parsing,
+        independent of any certificate wrapper. Malformed input, or input
+        that isn't a PrivateKeyInfo, returns a structured error, never a
+        crash.
+    - name: ParsePkcs1RsaKey
+      input: Asn1Input
+      output: RsaPrivateKeyResult
+      description: >-
+        Decode a PKCS#1 RSAPrivateKey structure (RFC 8017 — the traditional
+        RSA PRIVATE KEY format, or the payload inside a PKCS#8
+        PrivateKeyInfo's privateKey field for an RSA key) into its full CRT
+        key material — modulus, public exponent, private exponent, both
+        primes, both CRT exponents, and the CRT coefficient, each as
+        unsigned big-endian hex, plus the modulus bit length. Multi-prime
+        keys are not supported and return a structured error rather than
+        silent truncation. Malformed input, or input that isn't an
+        RSAPrivateKey, returns a structured error, never a crash.
+    - name: ParseSubjectPublicKeyInfo
+      input: Asn1Input
+      output: PublicKeyInfoResult
+      description: >-
+        Decode a SubjectPublicKeyInfo structure (the algorithm-agnostic
+        PUBLIC KEY wrapper used by RSA, EC, Ed25519, Ed448, X25519, X448, and
+        DSA keys alike — the same wrapper a certificate's own public key
+        field uses) into its algorithm OID + recognized name, the
+        algorithm's own parameters, and the raw subjectPublicKey BIT STRING
+        content — itself still an algorithm-specific encoding, returned as-is
+        rather than further decoded. Standalone key-structure parsing,
+        independent of any certificate wrapper. Malformed input, or input
+        that isn't a SubjectPublicKeyInfo, returns a structured error, never
+        a crash.
+    - name: ParseContentInfo
+      input: Asn1Input
+      output: ContentInfoResult
+      description: >-
+        Decode a CMS/PKCS#7 ContentInfo envelope (the outermost wrapper
+        around every CMS message — SignedData, EnvelopedData, DigestedData,
+        EncryptedData, AuthenticatedData, ...) into its content-type OID +
+        recognized name, and the inner content, both as raw DER and a
+        generic decoded tree. A purely structural unwrap — it does NOT
+        decrypt, verify signatures, or interpret content-type-specific
+        schema beyond the generic tree. content_present is false (not an
+        error) when the OPTIONAL content field was omitted. Malformed input,
+        or input that isn't a ContentInfo, returns a structured error, never
+        a crash.

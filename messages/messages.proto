@@ -1,0 +1,185 @@
+// This file defines the data contracts (messages) for your Axiom package.
+// Every node's --input and --output refers to a message defined here.
+//
+// Run `axiom create message <Name>` to scaffold a new message below.
+// Run `axiom generate` to compile these definitions into language bindings in gen/.
+//
+// DOCUMENTATION
+//   Comments written directly above a message or field declaration are extracted
+//   automatically at publish time and shown in the Axiom registry as documentation.
+//   Write your descriptions there — no separate doc files needed.
+//
+//   Leading comment  (no blank line before the declaration) → registry description ✓
+//   Detached comment (blank line before the declaration)    → ignored by registry  ✗
+//
+// This file is yours to edit. Axiom only appends new message blocks — it never
+// overwrites or removes content you have written.
+
+syntax = "proto3";
+
+package christiangeorgelucas.asn1_tools;
+
+// A caller-supplied ASN.1-encoded blob, given as EXACTLY ONE of three forms
+// (checked in this priority order when more than one is set): `pem` (a single
+// "-----BEGIN ...-----" armored block — any label; auto-dearmored), `data_base64`
+// (standard base64 of the raw DER/BER/CER bytes), or `data_hex` (lowercase or
+// uppercase hex of the same bytes). This shape is shared by every node that
+// consumes raw ASN.1 bytes in this package.
+message Asn1Input {
+  string data_hex = 1;
+  string data_base64 = 2;
+  string pem = 3;
+}
+
+// One node of a generic, recursively-decoded ASN.1 tree — the structural
+// decode of a BER/CER/DER TLV (tag-length-value), independent of any specific
+// schema. Produced by DecodeDer and consumed by EncodeDer (round-trippable).
+message Asn1Node {
+  // "universal", "application", "context", or "private" (X.690 tag class).
+  string tag_class = 1;
+  // The tag number within its class.
+  int32 tag_number = 2;
+  // True when the constructed bit is set (the value is nested TLVs, in `children`);
+  // false for a primitive (the value is raw content, in `value_hex`/`value_base64`).
+  bool constructed = 3;
+  // Friendly universal-type name (e.g. "INTEGER", "OCTET STRING", "SEQUENCE",
+  // "OBJECT IDENTIFIER") when tag_class == "universal" and the tag is recognized;
+  // empty otherwise (context/application/private tags, or an unrecognized universal tag).
+  string universal_type = 4;
+  // Length of this node's own content (not including its own header), in bytes.
+  int32 content_length = 5;
+  // Nested nodes, in encoded order, when constructed == true; empty otherwise.
+  repeated Asn1Node children = 6;
+  // Raw content bytes for a primitive node, as hex. Empty when constructed == true.
+  string value_hex = 7;
+  // The same content bytes as standard base64. Empty when constructed == true.
+  string value_base64 = 8;
+  // Which typed interpretation field below is populated for a primitive node:
+  // "oid", "integer", "boolean", "string", "time", "null", "bit_string", or ""
+  // (no typed interpretation attempted — read value_hex/value_base64 instead).
+  string value_kind = 9;
+  string value_oid = 10;       // dotted OID string, when value_kind == "oid"
+  string value_oid_name = 11;  // recognized friendly name of value_oid; empty when unrecognized
+  string value_integer = 12;   // arbitrary-precision decimal string, when value_kind == "integer"
+  bool value_boolean = 13;     // when value_kind == "boolean"
+  string value_string = 14;    // decoded text, when value_kind == "string" (UTF8String/PrintableString/IA5String/...)
+  string value_time = 15;      // RFC 3339 UTC, when value_kind == "time" (UTCTime/GeneralizedTime)
+  int32 unused_bits = 16;      // trailing unused-bit count, when value_kind == "bit_string"
+}
+
+message DecodeDerResult {
+  bool ok = 1;
+  string error = 2;
+  Asn1Node root = 3;
+}
+
+message EncodeDerResult {
+  bool ok = 1;
+  string error = 2;
+  string data_hex = 3;
+  string data_base64 = 4;
+}
+
+message PemInput {
+  string pem = 1;
+}
+
+// One armored block extracted from a (possibly multi-block) PEM text.
+message PemBlock {
+  string label = 1;                 // e.g. "CERTIFICATE", "PRIVATE KEY", "RSA PRIVATE KEY"
+  map<string, string> headers = 2;  // rare legacy PEM headers (e.g. "Proc-Type", "DEK-Info"); usually empty
+  string der_hex = 3;
+  string der_base64 = 4;
+}
+
+message PemDecodeResult {
+  bool ok = 1;
+  string error = 2;
+  repeated PemBlock blocks = 3;
+}
+
+// Encode raw DER/BER bytes (EXACTLY ONE of data_hex/data_base64) into PEM armor
+// under the given label, with optional legacy headers.
+message PemEncodeInput {
+  string label = 1;
+  map<string, string> headers = 2;
+  string data_hex = 3;
+  string data_base64 = 4;
+}
+
+message PemEncodeResult {
+  bool ok = 1;
+  string error = 2;
+  string pem = 3;
+}
+
+message OidInput {
+  string oid = 1; // dotted-decimal, e.g. "1.2.840.113549.1.1.1"
+}
+
+message OidResult {
+  bool ok = 1;
+  string error = 2;
+  string oid = 3;
+  bool known = 4;
+  string name = 5;      // recognized friendly/short name; empty when known == false
+  string category = 6;  // which registry recognized it: "public_key_algorithm", "signed_digest_algorithm",
+                         // "digest_algorithm", "content_type", or "" when known == false
+}
+
+message AlgorithmIdentifierResult {
+  bool ok = 1;
+  string error = 2;
+  string oid = 3;
+  string name = 4;              // recognized friendly name across the known algorithm OID registries; empty when unrecognized
+  bool parameters_present = 5;
+  string parameters_hex = 6;    // raw DER of the parameters field (whatever its type), when present
+  Asn1Node parameters_tree = 7; // generic decode of parameters_hex, when it is itself a well-formed TLV
+}
+
+message PrivateKeyInfoResult {
+  bool ok = 1;
+  string error = 2;
+  int32 version = 3;
+  string algorithm_oid = 4;
+  string algorithm_name = 5;      // "rsa", "ec", "ed25519", ... when recognized; empty otherwise
+  string algorithm_parameters_hex = 6;
+  string private_key_hex = 7;     // the raw, still-algorithm-specific-encoded privateKey OCTET STRING content
+  string private_key_base64 = 8;
+}
+
+message RsaPrivateKeyResult {
+  bool ok = 1;
+  string error = 2;
+  int32 version = 3;
+  int32 modulus_bits = 4;
+  string modulus_hex = 5;
+  string public_exponent_hex = 6;
+  string private_exponent_hex = 7;
+  string prime1_hex = 8;
+  string prime2_hex = 9;
+  string exponent1_hex = 10;
+  string exponent2_hex = 11;
+  string coefficient_hex = 12;
+}
+
+message PublicKeyInfoResult {
+  bool ok = 1;
+  string error = 2;
+  string algorithm_oid = 3;
+  string algorithm_name = 4;
+  string algorithm_parameters_hex = 5;
+  int32 public_key_bits = 6;      // bit length of the raw public-key BIT STRING content
+  string public_key_hex = 7;
+  string public_key_base64 = 8;
+}
+
+message ContentInfoResult {
+  bool ok = 1;
+  string error = 2;
+  string content_type_oid = 3;
+  string content_type_name = 4;   // "data", "signed_data", "enveloped_data", ... when recognized
+  bool content_present = 5;
+  string content_hex = 6;         // raw DER of the inner content (whatever its type)
+  Asn1Node content_tree = 7;      // generic decode of content_hex, when it is itself a well-formed TLV
+}
