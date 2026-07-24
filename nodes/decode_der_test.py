@@ -176,28 +176,6 @@ def test_decode_der_accepts_nesting_within_bound():
     assert result.ok is True
 
 
-def test_decode_der_rejects_excessive_node_count():
-    ax = _TestContext()
-    # One SEQUENCE containing 60,001 empty NULL siblings (2 bytes each) —
-    # exceeds MAX_TREE_NODES (50,000).
-    null_count = 60_001
-    content = b"\x05\x00" * null_count
-    data = b"\x30" + _der_len(len(content)) + content
-    result = decode_der(ax, Asn1Input(data_hex=data.hex()))
-    assert result.ok is False
-    assert "node" in result.error.lower() or "count" in result.error.lower()
-
-
-def test_decode_der_rejects_oversized_input():
-    ax = _TestContext()
-    from asn1crypto.core import OctetString
-    from nodes._asn1_common import MAX_INPUT_BYTES
-    big = OctetString(b"A" * (MAX_INPUT_BYTES + 100)).dump()
-    result = decode_der(ax, Asn1Input(data_hex=big.hex()))
-    assert result.ok is False
-    assert "size" in result.error.lower()
-
-
 def test_decode_der_boolean_and_null_and_oid():
     ax = _TestContext()
     # BOOLEAN TRUE: 01 01 FF

@@ -19,14 +19,11 @@ from asn1crypto.core import _dump_header, _parse
 from gen.messages_pb2 import Asn1Node
 
 # --- Bounds (input -> cost) -------------------------------------------------
-# A caller-controlled ASN.1 blob drives parse cost (allocation, recursion) in
-# direct proportion to these three dimensions. Each is bounded BEFORE the bytes
-# are touched by the parser, not after.
-MAX_INPUT_BYTES = 2 * 1024 * 1024      # raw decoded-input size cap (2 MiB)
-MAX_TREE_DEPTH = 64                    # nested constructed-value recursion cap
-MAX_TREE_NODES = 50_000                # total tree-node cap (adversarially wide trees)
-MAX_PEM_TEXT_BYTES = 8 * 1024 * 1024   # raw PEM text size cap (8 MiB; base64 text, so larger than the DER cap)
-MAX_PEM_BLOCKS = 1000                  # cap on the number of concatenated PEM blocks in one input
+# Payload size / element-count bounds are the platform's job, not this
+# package's — only the recursion-depth guard below stays, because it protects
+# against a genuine Python stack overflow in the recursive tree walk, not a
+# memory/DoS concern.
+MAX_TREE_DEPTH = 64                    # nested constructed-value recursion cap (stack-overflow guard)
 
 CLASS_NAMES = {0: "universal", 1: "application", 2: "context", 3: "private"}
 CLASS_NUMS = {v: k for k, v in CLASS_NAMES.items()}
@@ -104,25 +101,17 @@ def resolve_input_bytes(input_msg) -> bytes:
     hex_str = getattr(input_msg, "data_hex", "") or ""
 
     if pem_text:
-        if len(pem_text.encode("utf-8", "surrogateescape")) > MAX_INPUT_BYTES:
-            raise Asn1Error("pem input exceeds maximum size")
         try:
             _label, _headers, der_bytes = asn1_pem.unarmor(pem_text.encode("utf-8"))
         except Exception as e:
             raise Asn1Error(f"invalid PEM: {e}") from e
     elif b64:
-        if len(b64) > MAX_INPUT_BYTES * 2:
-            raise Asn1Error("data_base64 input exceeds maximum size")
         der_bytes = bytes_from_base64(b64)
     elif hex_str:
-        if len(hex_str) > MAX_INPUT_BYTES * 2:
-            raise Asn1Error("data_hex input exceeds maximum size")
         der_bytes = bytes_from_hex(hex_str)
     else:
         raise Asn1Error("one of pem, data_base64, or data_hex is required")
 
-    if len(der_bytes) > MAX_INPUT_BYTES:
-        raise Asn1Error("decoded input exceeds maximum size")
     if len(der_bytes) == 0:
         raise Asn1Error("decoded input is empty")
     return der_bytes
@@ -130,21 +119,16 @@ def resolve_input_bytes(input_msg) -> bytes:
 
 def iter_pem_blocks(pem_text: str):
     """Yield (label, headers_dict, der_bytes) for every armored block in a
-    (possibly multi-block) PEM text, bounding both the input text size and the
-    number of blocks. Raises Asn1Error on empty/malformed input."""
+    (possibly multi-block) PEM text. Raises Asn1Error on empty/malformed input."""
     if not pem_text:
         raise Asn1Error("pem is required")
     encoded = pem_text.encode("utf-8", "surrogateescape")
-    if len(encoded) > MAX_PEM_TEXT_BYTES:
-        raise Asn1Error("pem input exceeds maximum size")
     try:
         blocks = list(asn1_pem.unarmor(encoded, multiple=True))
     except Exception as e:
         raise Asn1Error(f"invalid PEM: {e}") from e
     if not blocks:
         raise Asn1Error("no PEM blocks found")
-    if len(blocks) > MAX_PEM_BLOCKS:
-        raise Asn1Error(f"PEM input exceeds the maximum block count ({MAX_PEM_BLOCKS})")
     return blocks
 
 
@@ -203,8 +187,6 @@ def _populate_typed_value(node: Asn1Node, tag_num: int, header: bytes, contents:
 def _build_node(class_num: int, method: int, tag_num: int, header: bytes,
                  contents: bytes, depth: int, budget: dict) -> Asn1Node:
     budget["count"] += 1
-    if budget["count"] > MAX_TREE_NODES:
-        raise Asn1Error(f"ASN.1 structure exceeds the maximum node count ({MAX_TREE_NODES})")
 
     node = Asn1Node(
         tag_class=CLASS_NAMES.get(class_num, "unknown"),
